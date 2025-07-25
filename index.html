@@ -60,7 +60,7 @@
     let worldCollidables = [];
 
     loader.load('model.glb', gltf => {
-      gltf.scene.position.set(10, 0, -5); // ⬅️ Geser model supaya pemain tidak di dalamnya
+      gltf.scene.position.set(0, 0, 0); // ⬅️ Geser model supaya pemain tidak di dalamnya
       scene.add(gltf.scene);
       gltf.scene.traverse(obj => {
         if (obj.isMesh) {
