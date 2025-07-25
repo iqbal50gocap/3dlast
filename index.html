@@ -1,8 +1,9 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>3D FPS Viewer (Fixed)</title>
+  <title>3D FPS Viewer (Solid Collisions + Model Switcher)</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     #instructions {
@@ -10,10 +11,15 @@
       text-align: center; color: white; font-size: 24px;
       z-index: 10; font-family: sans-serif;
     }
+    #upload {
+      position: absolute; top: 10px; left: 10px; z-index: 20;
+      color: white;
+    }
   </style>
 </head>
 <body>
   <div id="instructions">Click to Start</div>
+  <input type="file" id="upload" accept=".glb,.gltf">
   <script type="module">
     import * as THREE from './js/three.module.js';
     import { GLTFLoader } from './js/GLTFLoader.js';
@@ -53,17 +59,32 @@
 
     const loader = new GLTFLoader();
     let worldCollidables = [];
+    let currentModel = null;
 
-    loader.load('model.glb', gltf => {
-      gltf.scene.position.set(0, 0, -10);
-      scene.add(gltf.scene);
-      gltf.scene.traverse(obj => {
-        if (obj.isMesh) {
-          obj.geometry.computeBoundingBox();
-          worldCollidables.push(obj);
-        }
+    function loadGLBFromURL(url) {
+      if (currentModel) scene.remove(currentModel);
+      loader.load(url, gltf => {
+        gltf.scene.position.set(0, 0, -10);
+        currentModel = gltf.scene;
+        scene.add(currentModel);
+        worldCollidables = [];
+        gltf.scene.traverse(obj => {
+          if (obj.isMesh) {
+            obj.geometry.computeBoundingBox();
+            worldCollidables.push(obj);
+          }
+        });
       });
+    }
+
+    document.getElementById('upload').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      loadGLBFromURL(url);
     });
+
+    loadGLBFromURL('model.glb'); // default
 
     const move = { forward: false, backward: false, left: false, right: false };
     const velocity = new THREE.Vector3();
@@ -97,9 +118,8 @@
     const clock = new THREE.Clock();
     const raycaster = new THREE.Raycaster();
 
-    function checkForwardCollision() {
-      const dir = controls.getDirection(new THREE.Vector3()).normalize();
-      raycaster.set(controls.getObject().position, dir);
+    function checkCollision(dirVec) {
+      raycaster.set(controls.getObject().position, dirVec.normalize());
       const intersects = raycaster.intersectObjects(worldCollidables, true);
       return intersects.length > 0 && intersects[0].distance < 1.0;
     }
@@ -115,20 +135,21 @@
       direction.set(
         Number(move.right) - Number(move.left),
         0,
-        Number(move.forward) - Number(move.backward)
+        Number(move.backward) - Number(move.forward)
       ).normalize();
 
-      if (move.forward) velocity.z += 50.0 * delta;
-      if (move.backward) velocity.z -= 50.0 * delta;
+      const forwardVec = new THREE.Vector3();
+      controls.getDirection(forwardVec);
+
+      if (!(move.forward && checkCollision(forwardVec))) {
+        if (move.forward) velocity.z -= 50.0 * delta;
+      }
+      if (move.backward) velocity.z += 50.0 * delta;
       if (move.left) velocity.x -= 50.0 * delta;
       if (move.right) velocity.x += 50.0 * delta;
 
       controls.moveRight(velocity.x * delta);
-      // hanya gerak maju jika tidak menabrak, mundur tetap bisa
-      if (!checkForwardCollision() || velocity.z < 0) {
-        controls.moveForward(velocity.z * delta);
-      }
-
+      controls.moveForward(velocity.z * delta);
       controls.getObject().position.y += velocity.y * delta;
 
       if (controls.getObject().position.y < 1.6) {
