@@ -69,7 +69,7 @@
       worldCollidables = []; // Clear previous collidables
 
       loader.load(url, gltf => {
-        gltf.scene.position.set(0, -2, -3); // Position the loaded model
+        gltf.scene.position.set(0, 0, -3); // Position the loaded model
         currentModel = gltf.scene;
         scene.add(currentModel);
 
