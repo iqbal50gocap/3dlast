@@ -29,7 +29,7 @@
     scene.background = new THREE.Color(0x111111);
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 2, 10);
+    camera.position.set(0, 2, 10); // Start position adjusted slightly
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -60,19 +60,28 @@
     let worldCollidables = [];
     let currentModel = null;
 
+    // Player collision parameters
+    const playerRadius = 0.5; // Radius of the player capsule/sphere for collision
+    const playerHeight = 1.6; // Height of the camera in the player object
+
     function loadGLBFromURL(url) {
       if (currentModel) scene.remove(currentModel);
+      worldCollidables = []; // Clear previous collidables
+
       loader.load(url, gltf => {
-        gltf.scene.position.set(0, 0, -10);
+        gltf.scene.position.set(0, 0, -10); // Position the loaded model
         currentModel = gltf.scene;
         scene.add(currentModel);
-        worldCollidables = [];
+
         gltf.scene.traverse(obj => {
           if (obj.isMesh) {
-            obj.geometry.computeBoundingBox();
+            // For simple collision, we'll use the mesh directly as a collidable
+            // In a more complex game, you might use simplified collision meshes
             worldCollidables.push(obj);
           }
         });
+      }, undefined, error => {
+        console.error('Error loading GLB/GLTF model:', error);
       });
     }
 
@@ -83,14 +92,18 @@
       loadGLBFromURL(url);
     });
 
-    loadGLBFromURL('model.glb'); // default
+    loadGLBFromURL('model.glb'); // default model
 
     const move = { forward: false, backward: false, left: false, right: false };
     const velocity = new THREE.Vector3();
-    const direction = new THREE.Vector3();
     let canJump = true;
+    const playerSpeed = 10.0; // Adjust for desired movement speed
+    const gravity = 9.8 * 5.0; // Gravity strength
+    const jumpPower = 5; // Jump height
 
     document.addEventListener('keydown', e => {
+      if (!controls.isLocked) return; // Only process input if controls are locked
+
       switch (e.code) {
         case 'KeyW': move.forward = true; break;
         case 'KeyS': move.backward = true; break;
@@ -98,7 +111,7 @@
         case 'KeyD': move.right = true; break;
         case 'Space':
           if (canJump) {
-            velocity.y += 5;
+            velocity.y = jumpPower; // Set jump velocity
             canJump = false;
           }
           break;
@@ -106,6 +119,8 @@
     });
 
     document.addEventListener('keyup', e => {
+      if (!controls.isLocked) return; // Only process input if controls are locked
+
       switch (e.code) {
         case 'KeyW': move.forward = false; break;
         case 'KeyS': move.backward = false; break;
@@ -116,47 +131,97 @@
 
     const clock = new THREE.Clock();
     const raycaster = new THREE.Raycaster();
-
-    function checkCollision(dirVec) {
-      raycaster.set(controls.getObject().position, dirVec.normalize());
-      const intersects = raycaster.intersectObjects(worldCollidables, true);
-      return intersects.length > 0 && intersects[0].distance < 1.0;
-    }
+    const downVector = new THREE.Vector3(0, -1, 0); // For checking ground collision
 
     function animate() {
       requestAnimationFrame(animate);
 
       const delta = clock.getDelta();
+
+      // Apply friction/drag to horizontal velocity
       velocity.x -= velocity.x * 10.0 * delta;
       velocity.z -= velocity.z * 10.0 * delta;
-      velocity.y -= 9.8 * 5.0 * delta;
 
-      const forwardVec = new THREE.Vector3();
-      controls.getDirection(forwardVec);
+      // Apply gravity
+      velocity.y -= gravity * delta;
 
-      const sideVec = new THREE.Vector3().crossVectors(forwardVec, camera.up).normalize();
+      // Calculate desired movement direction
+      const inputDirection = new THREE.Vector3();
+      if (move.forward) inputDirection.z -= 1;
+      if (move.backward) inputDirection.z += 1;
+      if (move.left) inputDirection.x -= 1;
+      if (move.right) inputDirection.x += 1;
+      inputDirection.normalize(); // Normalize to prevent faster diagonal movement
 
-      if (move.forward && !checkCollision(forwardVec.clone())) {
-        velocity.z -= 50.0 * delta;
-      }
-      if (move.backward && !checkCollision(forwardVec.clone().negate())) {
-        velocity.z += 50.0 * delta;
-      }
-      if (move.left && !checkCollision(sideVec.clone().negate())) {
-        velocity.x -= 50.0 * delta;
-      }
-      if (move.right && !checkCollision(sideVec.clone())) {
-        velocity.x += 50.0 * delta;
+      // Apply speed based on input
+      if (move.forward || move.backward || move.left || move.right) {
+          // Get the camera's forward and right vectors
+          const forward = new THREE.Vector3();
+          controls.getDirection(forward);
+          forward.y = 0; // Keep horizontal
+          forward.normalize();
+
+          const right = new THREE.Vector3();
+          right.crossVectors(camera.up, forward);
+          right.y = 0; // Keep horizontal
+          right.normalize();
+
+          // Calculate movement based on camera's orientation
+          const moveX = right.x * inputDirection.x + forward.x * inputDirection.z;
+          const moveZ = right.z * inputDirection.x + forward.z * inputDirection.z;
+
+          velocity.x = moveX * playerSpeed;
+          velocity.z = moveZ * playerSpeed;
       }
 
+      // Store current player position
+      const prevPosition = controls.getObject().position.clone();
+
+      // Apply movement based on velocity
       controls.moveRight(velocity.x * delta);
       controls.moveForward(velocity.z * delta);
       controls.getObject().position.y += velocity.y * delta;
 
-      if (controls.getObject().position.y < 1.6) {
+      // Basic collision detection
+      const playerPos = controls.getObject().position.clone();
+
+      // Check for ground collision (always from slightly above the feet)
+      raycaster.set(new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z), downVector);
+      raycaster.far = playerHeight; // Check only for a short distance below the player
+      const intersectsGround = raycaster.intersectObjects(worldCollidables, true);
+
+      if (intersectsGround.length > 0) {
+        const intersection = intersectsGround[0];
+        // If falling and hit the ground, stop falling and place player on top
+        if (velocity.y < 0) {
+          controls.getObject().position.y = intersection.point.y + playerHeight;
+          velocity.y = 0;
+          canJump = true;
+        }
+      } else if (controls.getObject().position.y < playerHeight) { // Fall through if no ground collision
+        // This is a fallback if the raycaster doesn't catch the ground, e.g., if the ground is very thin
+        controls.getObject().position.y = playerHeight;
         velocity.y = 0;
-        controls.getObject().position.y = 1.6;
         canJump = true;
+      }
+
+      // Check for horizontal collisions (simplistic, can be improved with multiple rays or a bounding box)
+      // This is a very basic "push back" collision.
+      // For more robust collision, you'd calculate the collision normal and slide along it.
+      const currentMoveVec = controls.getObject().position.clone().sub(prevPosition);
+      if (currentMoveVec.lengthSq() > 0) { // Only check if player actually moved
+          const collisionRayOrigin = new THREE.Vector3(playerPos.x, playerPos.y - playerHeight / 2, playerPos.z);
+          const collisionRayDir = currentMoveVec.normalize();
+          raycaster.set(collisionRayOrigin, collisionRayDir);
+          raycaster.far = playerRadius + currentMoveVec.length(); // Check a bit further than the actual movement
+          const intersectsWalls = raycaster.intersectObjects(worldCollidables, true);
+
+          if (intersectsWalls.length > 0 && intersectsWalls[0].distance < currentMoveVec.length() + playerRadius) {
+            // Collision detected, revert position
+            controls.getObject().position.copy(prevPosition);
+            velocity.x = 0;
+            velocity.z = 0;
+          }
       }
 
       renderer.render(scene, camera);
