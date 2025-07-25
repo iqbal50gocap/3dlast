@@ -96,9 +96,9 @@
     const velocity = new THREE.Vector3();
     const desiredMovement = new THREE.Vector3();
     let canJump = true;
-    const playerSpeed = 25.0; // Increased player speed for faster movement
+    const playerSpeed = 25.0; // Adjusted for desired movement speed
     const gravity = 9.8 * 5.0; // Gravity strength
-    const jumpPower = 5; // Jump height
+    const jumpPower = 10; // Increased jump height for a noticeable jump
 
     document.addEventListener('keydown', e => {
       if (!controls.isLocked) return;
@@ -138,9 +138,8 @@
       const delta = clock.getDelta();
 
       // Apply friction/drag to horizontal velocity
-      // Reduce the friction slightly or increase player speed further if it's still too slow
-      velocity.x -= velocity.x * 5.0 * delta; // Adjusted friction
-      velocity.z -= velocity.z * 5.0 * delta; // Adjusted friction
+      velocity.x -= velocity.x * 5.0 * delta;
+      velocity.z -= velocity.z * 5.0 * delta;
 
       // Apply gravity
       velocity.y -= gravity * delta;
@@ -150,22 +149,16 @@
 
       // Calculate desired horizontal movement based on keys and camera direction
       const forwardDir = new THREE.Vector3();
-      controls.getDirection(forwardDir);
-      forwardDir.y = 0;
+      // Get the camera's true world forward direction
+      camera.getWorldDirection(forwardDir);
+      forwardDir.y = 0; // Keep horizontal
       forwardDir.normalize();
 
       const rightDir = new THREE.Vector3();
-      // Corrected: controls.getDirection(forwardDir) gives the direction the camera is looking.
-      // To get the 'right' vector, we should use the camera's actual right vector or cross product.
-      // Using camera.right is more direct for PointerLockControls.
-      camera.getWorldDirection(forwardDir); // Get actual forward direction of camera
-      forwardDir.y = 0;
-      forwardDir.normalize();
-
-      rightDir.crossVectors(camera.up, forwardDir); // Recalculate right based on corrected forward
-      rightDir.y = 0;
+      // Get the camera's true world right direction
+      rightDir.crossVectors(camera.up, forwardDir); // This correctly calculates the 'right' vector
+      rightDir.y = 0; // Keep horizontal
       rightDir.normalize();
-
 
       if (move.forward) {
         desiredMovement.addScaledVector(forwardDir, playerSpeed);
@@ -174,11 +167,11 @@
         desiredMovement.addScaledVector(forwardDir, -playerSpeed);
       }
       if (move.left) {
-        // Corrected: 'left' should be negative right, 'right' should be positive right
+        // Corrected: Moving left is subtracting from the right vector
         desiredMovement.addScaledVector(rightDir, -playerSpeed);
       }
       if (move.right) {
-        // Corrected
+        // Corrected: Moving right is adding to the right vector
         desiredMovement.addScaledVector(rightDir, playerSpeed);
       }
 
@@ -186,31 +179,29 @@
       velocity.x += desiredMovement.x * delta;
       velocity.z += desiredMovement.z * delta;
 
-
       // Store current player position BEFORE applying movement for collision checks
       const prevPosition = controls.getObject().position.clone();
-
-      // Tentative next position
-      const nextX = controls.getObject().position.x + velocity.x * delta;
-      const nextY = controls.getObject().position.y + velocity.y * delta;
-      const nextZ = controls.getObject().position.z + velocity.z * delta;
 
       // --- Collision Detection ---
 
       // 1. Ground Collision
-      const playerFeetPos = new THREE.Vector3(prevPosition.x, prevPosition.y - (playerHeight / 2), prevPosition.z);
-      raycaster.set(playerFeetPos, downVector);
-      raycaster.far = (playerHeight / 2) + 0.1;
+      // Ray from slightly above the player's base, pointing down
+      const rayOriginGround = new THREE.Vector3(prevPosition.x, prevPosition.y, prevPosition.z);
+      raycaster.set(rayOriginGround, downVector);
+      raycaster.far = playerHeight / 2 + 0.1; // Check from camera position down to a bit below feet
       const intersectsGround = raycaster.intersectObjects(worldCollidables, true);
 
       if (intersectsGround.length > 0) {
         const intersection = intersectsGround[0];
+        // If falling (velocity.y < 0) and we hit ground
         if (velocity.y < 0) {
+          // Place player precisely on top of the intersected surface
           controls.getObject().position.y = intersection.point.y + (playerHeight / 2);
-          velocity.y = 0;
-          canJump = true;
+          velocity.y = 0; // Stop vertical movement
+          canJump = true; // Allow jumping again
         }
-      } else if (nextY < (playerHeight / 2)) {
+      } else if (controls.getObject().position.y < (playerHeight / 2)) {
+        // Fallback for flat ground or if ray misses (prevents falling indefinitely)
         controls.getObject().position.y = (playerHeight / 2);
         velocity.y = 0;
         canJump = true;
@@ -218,44 +209,47 @@
 
       // 2. Horizontal Collisions (Walls)
       const currentPos = controls.getObject().position.clone();
-      // Calculate the target position *after* horizontal velocity has been applied
-      const targetX = controls.getObject().position.x + velocity.x * delta;
-      const targetZ = controls.getObject().position.z + velocity.z * delta;
-      const targetPos = new THREE.Vector3(targetX, controls.getObject().position.y, targetZ);
+      const nextX = controls.getObject().position.x + velocity.x * delta;
+      const nextZ = controls.getObject().position.z + velocity.z * delta;
+      const targetHorizontalPos = new THREE.Vector3(nextX, currentPos.y, nextZ); // Only consider horizontal movement for this check
 
-      const moveDeltaVector = targetPos.clone().sub(currentPos);
+      const moveDeltaVector = targetHorizontalPos.clone().sub(currentPos);
       const moveDistance = moveDeltaVector.length();
 
-      if (moveDistance > 0.001) { // Check only if there's significant movement
+      if (moveDistance > 0.001) { // Check only if there's significant horizontal movement
           const moveDirectionNormalized = moveDeltaVector.normalize();
 
-          // Cast a ray from the current player position in the direction of movement
-          // Extend ray length by player radius to detect collision before full overlap
-          const collisionRayLength = moveDistance + playerRadius + 0.1; // Add a small buffer
+          // Cast ray from player's current horizontal position, extending by playerRadius + intended move distance
+          // Adding playerRadius to the raycaster origin effectively checks from the edge of the player.
+          // Or, cast from center and extend the 'far' distance. Let's try extending far distance.
+          const horizontalRayOrigin = new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z);
+          raycaster.set(horizontalRayOrigin, moveDirectionNormalized);
+          raycaster.far = moveDistance + playerRadius + 0.1; // Check past the player's edge and intended move
 
-          raycaster.set(currentPos, moveDirectionNormalized);
-          raycaster.far = collisionRayLength;
           let intersectsWalls = raycaster.intersectObjects(worldCollidables, true);
 
-          if (intersectsWalls.length > 0 && intersectsWalls[0].distance < (moveDistance + playerRadius)) {
-            // Collision detected. Stop horizontal movement.
-            velocity.x = 0;
-            velocity.z = 0;
-            // Optionally, try to push the player back slightly if already inside
-            const hitPoint = intersectsWalls[0].point;
-            const hitNormal = intersectsWalls[0].face.normal; // Get surface normal
-            // Adjust position to slide along surface or just stop
-            // For simple stop, we revert to previous valid position (before applying velocity)
-            controls.getObject().position.copy(prevPosition);
+          if (intersectsWalls.length > 0) {
+            const firstIntersection = intersectsWalls[0];
+            // If the collision point is within the player's future bounds
+            if (firstIntersection.distance < moveDistance + playerRadius - 0.1) { // A slight buffer to prevent getting stuck
+              // Collision detected. Stop horizontal movement.
+              velocity.x = 0;
+              velocity.z = 0;
+              // If already slightly inside, try to push back
+              const penetrationDepth = (moveDistance + playerRadius) - firstIntersection.distance;
+              if (penetrationDepth > 0) {
+                  controls.getObject().position.x -= moveDirectionNormalized.x * penetrationDepth;
+                  controls.getObject().position.z -= moveDirectionNormalized.z * penetrationDepth;
+              }
+            }
           }
       }
 
       // Apply the final movement based on calculated velocities
       controls.getObject().position.x += velocity.x * delta;
       controls.getObject().position.z += velocity.z * delta;
-      // Y-position is already handled by gravity and ground collision
-
-
+      controls.getObject().position.y += velocity.y * delta; // Apply vertical velocity here
+      
       renderer.render(scene, camera);
     }
 
