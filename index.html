@@ -17,7 +17,7 @@
   </style>
 </head>
 <body>
-  <div id="instructions">Click to Start</div>
+  <div id="instructions">Klik untuk Mulai</div>
   <input type="file" id="upload" accept=".glb,.gltf">
   <script type="module">
     import * as THREE from './js/three.module.js';
@@ -29,7 +29,7 @@
     scene.background = new THREE.Color(0x111111);
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 2, 10);
+    camera.position.set(0, 2, 0); // Posisi awal kamera (sedikit disesuaikan)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -51,37 +51,64 @@
     scene.add(dirLight);
 
     const gui = new GUI();
-    const lightFolder = gui.addFolder('Lighting');
-    lightFolder.add(dirLight, 'intensity', 0, 5).name('Directional Light');
-    lightFolder.add(hemiLight, 'intensity', 0, 5).name('Hemisphere Light');
+    const lightFolder = gui.addFolder('Pencahayaan');
+    lightFolder.add(dirLight, 'intensity', 0, 5).name('Cahaya Arah');
+    lightFolder.add(hemiLight, 'intensity', 0, 5).name('Cahaya Hemisfer');
     lightFolder.open();
 
     const loader = new GLTFLoader();
     let worldCollidables = [];
     let currentModel = null;
 
-    // Player collision parameters
-    const playerRadius = 0.5; // Radius of the player capsule/sphere for collision
-    const playerHeight = 1.6; // Height of the camera in the player object (approx. eye level)
+    // Parameter kollisi pemain
+    const playerRadius = 0.4; // Jari-jari pemain (lebih kecil sedikit agar tidak mudah nyangkut)
+    const playerHeight = 1.7; // Tinggi pemain (setinggi mata kamera)
+    const playerHalfHeight = playerHeight / 2; // Setengah tinggi pemain
+    const stepHeight = 0.3; // Ketinggian tangga/tanah yang bisa dinaiki otomatis
 
     function loadGLBFromURL(url) {
       if (currentModel) scene.remove(currentModel);
-      worldCollidables = []; // Clear previous collidables
+      worldCollidables = [];
 
       loader.load(url, gltf => {
-        gltf.scene.position.set(0, 0, -10); // Position the loaded model
+        gltf.scene.position.set(0, 0, -5); // Posisikan di asal (0,0,0) agar mudah diatur
         currentModel = gltf.scene;
         scene.add(currentModel);
 
         gltf.scene.traverse(obj => {
           if (obj.isMesh) {
+            obj.geometry.computeBoundingBox(); // Penting untuk deteksi kollisi mesh
             worldCollidables.push(obj);
           }
         });
+        // Setelah model dimuat, pastikan pemain berada di atas tanah
+        // Ini membantu jika model dimulai di bawah tanah
+        teleportPlayerToGround();
       }, undefined, error => {
-        console.error('Error loading GLB/GLTF model:', error);
+        console.error('Gagal memuat model GLB/GLTF:', error);
       });
     }
+
+    function teleportPlayerToGround() {
+        const playerPos = controls.getObject().position;
+        const rayOrigin = new THREE.Vector3(playerPos.x, playerPos.y + 10, playerPos.z); // Mulai dari atas
+        raycaster.set(rayOrigin, downVector);
+        raycaster.far = 1000; // Jauhkan jangkauan ray
+
+        const intersects = raycaster.intersectObjects(worldCollidables, true);
+        if (intersects.length > 0) {
+            // Tempatkan pemain di atas permukaan yang ditemukan
+            controls.getObject().position.y = intersects[0].point.y + playerHalfHeight;
+            velocity.y = 0; // Pastikan kecepatan y nol
+            canJump = true; // Bisa langsung melompat
+        } else {
+            // Jika tidak ada tanah, set di ketinggian default
+            controls.getObject().position.y = playerHalfHeight;
+            velocity.y = 0;
+            canJump = true;
+        }
+    }
+
 
     document.getElementById('upload').addEventListener('change', (e) => {
       const file = e.target.files[0];
@@ -90,19 +117,18 @@
       loadGLBFromURL(url);
     });
 
-    loadGLBFromURL('model.glb'); // default model
+    loadGLBFromURL('model.glb'); // Muat model.glb sebagai default
 
     const move = { forward: false, backward: false, left: false, right: false };
     const velocity = new THREE.Vector3();
     const desiredMovement = new THREE.Vector3();
     let canJump = true;
-    const playerSpeed = 25.0; // Adjusted for desired movement speed
-    const gravity = 9.8 * 5.0; // Gravity strength
-    const jumpPower = 10; // Increased jump height for a noticeable jump
+    const playerSpeed = 15.0; // Kecepatan bergerak (disesuaikan lagi)
+    const gravity = 9.8 * 5.0;
+    const jumpPower = 7; // Kekuatan lompatan (disesuaikan lagi)
 
     document.addEventListener('keydown', e => {
       if (!controls.isLocked) return;
-
       switch (e.code) {
         case 'KeyW': move.forward = true; break;
         case 'KeyS': move.backward = true; break;
@@ -119,7 +145,6 @@
 
     document.addEventListener('keyup', e => {
       if (!controls.isLocked) return;
-
       switch (e.code) {
         case 'KeyW': move.forward = false; break;
         case 'KeyS': move.backward = false; break;
@@ -137,27 +162,24 @@
 
       const delta = clock.getDelta();
 
-      // Apply friction/drag to horizontal velocity
-      velocity.x -= velocity.x * 5.0 * delta;
-      velocity.z -= velocity.z * 5.0 * delta;
+      // Mengurangi kecepatan horizontal seiring waktu (gesekan)
+      velocity.x -= velocity.x * 8.0 * delta; // Sedikit lebih banyak gesekan
+      velocity.z -= velocity.z * 8.0 * delta; // Sedikit lebih banyak gesekan
 
-      // Apply gravity
+      // Terapkan gravitasi
       velocity.y -= gravity * delta;
 
-      // Reset desired movement for this frame
       desiredMovement.set(0, 0, 0);
 
-      // Calculate desired horizontal movement based on keys and camera direction
+      // Hitung arah gerakan berdasarkan input dan orientasi kamera
       const forwardDir = new THREE.Vector3();
-      // Get the camera's true world forward direction
       camera.getWorldDirection(forwardDir);
-      forwardDir.y = 0; // Keep horizontal
+      forwardDir.y = 0;
       forwardDir.normalize();
 
       const rightDir = new THREE.Vector3();
-      // Get the camera's true world right direction
-      rightDir.crossVectors(camera.up, forwardDir); // This correctly calculates the 'right' vector
-      rightDir.y = 0; // Keep horizontal
+      rightDir.crossVectors(camera.up, forwardDir);
+      rightDir.y = 0;
       rightDir.normalize();
 
       if (move.forward) {
@@ -167,88 +189,109 @@
         desiredMovement.addScaledVector(forwardDir, -playerSpeed);
       }
       if (move.left) {
-        // Corrected: Moving left is subtracting from the right vector
         desiredMovement.addScaledVector(rightDir, -playerSpeed);
       }
       if (move.right) {
-        // Corrected: Moving right is adding to the right vector
         desiredMovement.addScaledVector(rightDir, playerSpeed);
       }
 
-      // Apply desired movement to velocity
+      // Terapkan gerakan yang diinginkan ke kecepatan
       velocity.x += desiredMovement.x * delta;
       velocity.z += desiredMovement.z * delta;
 
-      // Store current player position BEFORE applying movement for collision checks
+      // Simpan posisi saat ini sebelum bergerak untuk deteksi kollisi
       const prevPosition = controls.getObject().position.clone();
 
-      // --- Collision Detection ---
+      // --- Perhitungan Posisi Selanjutnya dan Deteksi Kollisi ---
 
-      // 1. Ground Collision
-      // Ray from slightly above the player's base, pointing down
-      const rayOriginGround = new THREE.Vector3(prevPosition.x, prevPosition.y, prevPosition.z);
-      raycaster.set(rayOriginGround, downVector);
-      raycaster.far = playerHeight / 2 + 0.1; // Check from camera position down to a bit below feet
-      const intersectsGround = raycaster.intersectObjects(worldCollidables, true);
-
-      if (intersectsGround.length > 0) {
-        const intersection = intersectsGround[0];
-        // If falling (velocity.y < 0) and we hit ground
-        if (velocity.y < 0) {
-          // Place player precisely on top of the intersected surface
-          controls.getObject().position.y = intersection.point.y + (playerHeight / 2);
-          velocity.y = 0; // Stop vertical movement
-          canJump = true; // Allow jumping again
-        }
-      } else if (controls.getObject().position.y < (playerHeight / 2)) {
-        // Fallback for flat ground or if ray misses (prevents falling indefinitely)
-        controls.getObject().position.y = (playerHeight / 2);
-        velocity.y = 0;
-        canJump = true;
-      }
-
-      // 2. Horizontal Collisions (Walls)
-      const currentPos = controls.getObject().position.clone();
+      // Tentukan posisi horizontal sementara
       const nextX = controls.getObject().position.x + velocity.x * delta;
       const nextZ = controls.getObject().position.z + velocity.z * delta;
-      const targetHorizontalPos = new THREE.Vector3(nextX, currentPos.y, nextZ); // Only consider horizontal movement for this check
 
-      const moveDeltaVector = targetHorizontalPos.clone().sub(currentPos);
-      const moveDistance = moveDeltaVector.length();
+      // Cek Kollisi Horizontal (Tembok) - Raycasting dari beberapa titik
+      const currentHorizontalPos = new THREE.Vector3(prevPosition.x, prevPosition.y, prevPosition.z);
+      const targetHorizontalPos = new THREE.Vector3(nextX, prevPosition.y, nextZ);
 
-      if (moveDistance > 0.001) { // Check only if there's significant horizontal movement
-          const moveDirectionNormalized = moveDeltaVector.normalize();
+      const horizontalMoveVec = targetHorizontalPos.clone().sub(currentHorizontalPos);
+      const horizontalMoveDistance = horizontalMoveVec.length();
 
-          // Cast ray from player's current horizontal position, extending by playerRadius + intended move distance
-          // Adding playerRadius to the raycaster origin effectively checks from the edge of the player.
-          // Or, cast from center and extend the 'far' distance. Let's try extending far distance.
-          const horizontalRayOrigin = new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z);
-          raycaster.set(horizontalRayOrigin, moveDirectionNormalized);
-          raycaster.far = moveDistance + playerRadius + 0.1; // Check past the player's edge and intended move
+      if (horizontalMoveDistance > 0.001) { // Jika ada gerakan horizontal
+          const horizontalMoveDir = horizontalMoveVec.normalize();
 
-          let intersectsWalls = raycaster.intersectObjects(worldCollidables, true);
+          // Kirim beberapa ray untuk simulasi kollisi silinder pemain
+          const rays = [
+              horizontalMoveDir, // Ray tengah
+              new THREE.Vector3().crossVectors(camera.up, horizontalMoveDir).normalize().multiplyScalar(playerRadius * 0.8), // Ray ke samping kiri
+              new THREE.Vector3().crossVectors(horizontalMoveDir, camera.up).normalize().multiplyScalar(playerRadius * 0.8)  // Ray ke samping kanan
+          ];
 
-          if (intersectsWalls.length > 0) {
-            const firstIntersection = intersectsWalls[0];
-            // If the collision point is within the player's future bounds
-            if (firstIntersection.distance < moveDistance + playerRadius - 0.1) { // A slight buffer to prevent getting stuck
-              // Collision detected. Stop horizontal movement.
+          let hitWall = false;
+          for (const rayOffset of rays) {
+              const rayOrigin = currentHorizontalPos.clone().add(rayOffset); // Mulai dari tepi pemain
+              raycaster.set(rayOrigin, horizontalMoveDir);
+              raycaster.far = horizontalMoveDistance + 0.1; // Cek sedikit lebih jauh dari jarak gerakan
+
+              const intersects = raycaster.intersectObjects(worldCollidables, true);
+              if (intersects.length > 0 && intersects[0].distance < horizontalMoveDistance + 0.05) { // Sedikit buffer
+                  hitWall = true;
+                  break;
+              }
+          }
+
+          if (hitWall) {
+              // Jika menabrak tembok, hentikan gerakan horizontal
               velocity.x = 0;
               velocity.z = 0;
-              // If already slightly inside, try to push back
-              const penetrationDepth = (moveDistance + playerRadius) - firstIntersection.distance;
-              if (penetrationDepth > 0) {
-                  controls.getObject().position.x -= moveDirectionNormalized.x * penetrationDepth;
-                  controls.getObject().position.z -= moveDirectionNormalized.z * penetrationDepth;
-              }
-            }
           }
       }
 
-      // Apply the final movement based on calculated velocities
+      // Perbarui posisi horizontal setelah kollisi tembok
       controls.getObject().position.x += velocity.x * delta;
       controls.getObject().position.z += velocity.z * delta;
-      controls.getObject().position.y += velocity.y * delta; // Apply vertical velocity here
+
+      // --- Kollisi Vertikal (Tanah, Tanjakan, Lompat) ---
+      // Perbarui posisi Y sementara dengan gravitasi
+      let tentativeY = controls.getObject().position.y + velocity.y * delta;
+
+      const playerBottomPos = new THREE.Vector3(controls.getObject().position.x, controls.getObject().position.y - playerHalfHeight, controls.getObject().position.z);
+      
+      // Raycast ke bawah untuk mendeteksi tanah
+      raycaster.set(playerBottomPos, downVector);
+      raycaster.far = Math.abs(velocity.y * delta) + stepHeight + 0.1; // Jangkauan ray: kecepatan jatuh + tinggi anak tangga
+
+      const intersectsGround = raycaster.intersectObjects(worldCollidables, true);
+
+      if (intersectsGround.length > 0) {
+          const intersection = intersectsGround[0];
+          const groundY = intersection.point.y;
+          
+          // Jika sedang jatuh (kecepatan Y negatif)
+          if (velocity.y < 0) {
+              // Jika pemain akan jatuh ke bawah atau menabrak tanah
+              if (tentativeY - playerHalfHeight <= groundY) { // Jika kaki pemain akan lebih rendah dari tanah
+                  controls.getObject().position.y = groundY + playerHalfHeight; // Tempatkan pemain di atas tanah
+                  velocity.y = 0; // Hentikan kecepatan jatuh
+                  canJump = true; // Izinkan melompat
+              }
+          } else if (velocity.y === 0 && (controls.getObject().position.y - playerHalfHeight > groundY + 0.01)) {
+              // Jika di atas tanah (bukan melompat) dan ada celah kecil, pastikan dia tetap jatuh
+              // Ini penting untuk tanjakan atau turun
+              velocity.y = -0.1; // Beri sedikit kecepatan ke bawah agar tetap "menempel"
+          }
+      } else {
+          // Jika tidak ada tanah terdeteksi di bawah, biarkan jatuh oleh gravitasi
+          // Pastikan tidak jatuh di bawah "tanah" virtual jika tidak ada model
+          if (tentativeY < playerHalfHeight) {
+              controls.getObject().position.y = playerHalfHeight;
+              velocity.y = 0;
+              canJump = true;
+          } else {
+              controls.getObject().position.y = tentativeY; // Lanjutkan jatuh
+          }
+      }
+
+      // Perbarui posisi Y terakhir
+      controls.getObject().position.y += velocity.y * delta;
       
       renderer.render(scene, camera);
     }
