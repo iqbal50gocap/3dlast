@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -29,6 +28,7 @@
   <script type="module">
     import * as THREE from './js/three.module.js';
     import { GLTFLoader } from './js/GLTFLoader.js';
+    import { DRACOLoader } from './js/DRACOLoader.js';
     import { OrbitControls } from './js/OrbitControls.js';
 
     let scene, camera, renderer, mixer, actions = {};
@@ -51,7 +51,13 @@
     const ambient = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambient);
 
+    // 🧩 DRACO Loader Setup
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('./js/draco/'); // pastikan path ini benar
+
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader); // hubungkan DRACO ke GLTFLoader
+
     loader.load('untitled.glb', gltf => {
       const model = gltf.scene;
       scene.add(model);
