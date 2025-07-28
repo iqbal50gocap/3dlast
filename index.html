@@ -66,6 +66,10 @@
 
       gltf.animations.forEach((clip) => {
         actions[clip.name] = mixer.clipAction(clip);
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
+        action.enabled = true;
+        actions[clip.name] = action;
       });
 
     }, undefined, console.error);
