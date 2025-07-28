@@ -2,119 +2,146 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>GLB Viewer with Camera Views & Toggle</title>
+  <title>3D Viewer with Camera & Drawer UI</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; overflow: hidden; background: #111; }
     canvas { display: block; }
-    #cameraUI, .toggle-button {
-      position: absolute;
-      z-index: 10;
-      background: rgba(255, 255, 255, 0.8);
-      border: none;
-      padding: 6px 10px;
-      margin: 5px;
-      font-size: 14px;
-      cursor: pointer;
-    }
     #cameraUI {
-      top: 10px;
-      left: 10px;
+      position: absolute; top: 10px; left: 10px;
+      z-index: 10;
     }
-    .toggle-button {
+    .camera-btn {
+      margin: 4px; padding: 8px 12px;
+      font-size: 14px;
+    }
+    .toggle-btn {
+      position: absolute;
+      background: rgba(255,255,255,0.8);
+      color: black;
+      padding: 3px 6px;
       font-size: 12px;
-      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      z-index: 10;
     }
   </style>
 </head>
 <body>
   <div id="cameraUI">
-    <button onclick="switchToCamera('view1')">Tampak Depan</button>
-    <button onclick="switchToCamera('view2')">Tampak Samping</button>
+    <button class="camera-btn" onclick="switchCamera('view1')">Tampak Depan</button>
+    <button class="camera-btn" onclick="switchCamera('view2')">Tampak Samping</button>
   </div>
+  <div id="drawerToggle" class="toggle-btn" style="display:none;">Open</div>
 
   <script type="module">
     import * as THREE from './js/three.module.js';
-    import { GLTFLoader } from './js/GLTFLoader.js';
     import { OrbitControls } from './js/OrbitControls.js';
+    import { GLTFLoader } from './js/GLTFLoader.js';
+    import { DRACOLoader } from './js/DRACOLoader.js';
 
-    let scene, camera, renderer, controls;
-    let mixer, actions = {}, cameraMap = {}, drawer, drawerUI;
+    let scene, camera, renderer, controls, mixer;
     const clock = new THREE.Clock();
+    const actions = {};
+    let activeAction = null;
+    let drawerToggle = document.getElementById("drawerToggle");
+    let drawerObj, camList = {};
+    let currentState = 'closed';
 
     scene = new THREE.Scene();
-
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(2, 2, 3);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(3, 2, 3);
+
     controls = new OrbitControls(camera, renderer.domElement);
 
-    const light = new THREE.DirectionalLight(0xffffff, 2);
-    light.position.set(5, 10, 5);
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(5, 10, 5);
+    scene.add(dirLight);
+
+    // DRACO Setup
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('./js/draco/');
 
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+
     loader.load('untitled.glb', gltf => {
       const model = gltf.scene;
       scene.add(model);
-
-      drawer = model.getObjectByName('Drawer'); // pastikan nama objek drawer sesuai
-      drawerUI = createToggleButton("Open", () => toggleDrawer());
-      document.body.appendChild(drawerUI);
-
       mixer = new THREE.AnimationMixer(model);
-      gltf.animations.forEach(clip => {
-        const action = mixer.clipAction(clip);
-        action.clampWhenFinished = true;
-        action.loop = THREE.LoopOnce;
-        actions[clip.name.toLowerCase()] = action;
+
+      // Ambil semua kamera
+      gltf.cameras?.forEach(cam => {
+        if (cam.name) camList[cam.name] = cam;
       });
 
-      gltf.cameras.forEach(cam => {
-        cameraMap[cam.name.toLowerCase()] = cam;
+      // Ambil object laci (by name atau manual)
+      drawerObj = model.getObjectByName('Drawer') || model;
+
+      // Simpan semua animasi
+      gltf.animations.forEach(clip => {
+        const action = mixer.clipAction(clip);
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
+        action.enabled = true;
+        actions[clip.name.toLowerCase()] = action;
       });
     });
 
-    let isOpen = false;
-    function toggleDrawer() {
-      const actionName = isOpen ? 'closedrawer' : 'opendrawer';
-      if (!actions[actionName]) return;
-      Object.values(actions).forEach(a => a.stop());
-      actions[actionName].reset().play();
-      isOpen = !isOpen;
-      drawerUI.textContent = isOpen ? "Close" : "Open";
+    function playAction(name) {
+      name = name.toLowerCase();
+      if (!actions[name]) return;
+      if (activeAction) activeAction.stop();
+      activeAction = actions[name];
+      activeAction.reset().play();
     }
 
-    function createToggleButton(text, callback) {
-      const btn = document.createElement('button');
-      btn.className = 'toggle-button';
-      btn.textContent = text;
-      btn.onclick = callback;
-      return btn;
+    drawerToggle.addEventListener('click', () => {
+      if (currentState === 'closed') {
+        playAction('opendrawer');
+        drawerToggle.innerText = 'Close';
+        currentState = 'open';
+      } else {
+        playAction('closedrawer');
+        drawerToggle.innerText = 'Open';
+        currentState = 'closed';
+      }
+    });
+
+    function switchCamera(name) {
+      if (camList[name]) {
+        camera.position.copy(camList[name].position);
+        camera.quaternion.copy(camList[name].quaternion);
+      }
     }
 
-    function switchToCamera(name) {
-      const cam = cameraMap[name.toLowerCase()];
-      if (!cam) return;
-      camera.position.copy(cam.position);
-      camera.quaternion.copy(cam.quaternion);
+    function updateUIPosition() {
+      if (!drawerObj) return;
+      const dist = camera.position.distanceTo(drawerObj.position);
+      if (dist < 2.5) {
+        const vector = drawerObj.position.clone();
+        vector.project(camera);
+        const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+        const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+        drawerToggle.style.left = `${x - 25}px`;
+        drawerToggle.style.top = `${y - 15}px`;
+        drawerToggle.style.display = 'block';
+      } else {
+        drawerToggle.style.display = 'none';
+      }
     }
 
     function animate() {
       requestAnimationFrame(animate);
       if (mixer) mixer.update(clock.getDelta());
-      if (drawer && drawerUI) {
-        const pos = drawer.position.clone().project(camera);
-        const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
-        const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
-        drawerUI.style.left = `${x}px`;
-        drawerUI.style.top = `${y}px`;
-        drawerUI.style.display = camera.position.distanceTo(drawer.position) < 3 ? 'block' : 'none';
-      }
+      controls.update();
+      updateUIPosition();
       renderer.render(scene, camera);
     }
     animate();
