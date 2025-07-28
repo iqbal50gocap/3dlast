@@ -47,13 +47,20 @@
     let activeAction = null;
     let currentState = 'closed';
     let drawerToggle = document.getElementById("drawerToggle");
-    let drawerObj, camList = {};
+    let drawerObj, camList = {}, camerasFromGLB = [];
 
     scene = new THREE.Scene();
+
+    // Lighting from user settings
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    dirLight.position.set(5, 10, 7);
+    scene.add(ambientLight, dirLight);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.LinearToneMapping;
     document.body.appendChild(renderer.domElement);
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -71,15 +78,13 @@
       scene.add(model);
       mixer = new THREE.AnimationMixer(model);
 
-      // Gunakan light dari Blender, jangan override
-      gltf.parser.getDependencies('light').then(lights => {
-        lights.forEach(light => scene.add(light));
-      });
-
-      // Kamera bawaan Blender
-      gltf.cameras?.forEach(cam => {
-        if (cam.name) camList[cam.name] = cam;
-      });
+      // Simpan kamera dari GLB
+      if (gltf.cameras) {
+        gltf.cameras.forEach(cam => {
+          if (cam.name) camList[cam.name] = cam;
+          camerasFromGLB.push(cam);
+        });
+      }
 
       // Object drawer
       drawerObj = model.getObjectByName('Drawer') || model;
@@ -115,8 +120,11 @@
 
     function switchCamera(name) {
       if (camList[name]) {
-        camera.position.copy(camList[name].position);
-        camera.quaternion.copy(camList[name].quaternion);
+        // Salin posisi dan rotasi dari kamera GLB ke kamera aktif
+        const glbCam = camList[name];
+        camera.position.copy(glbCam.position);
+        camera.quaternion.copy(glbCam.quaternion);
+        controls.update();
       }
     }
 
