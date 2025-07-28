@@ -2,25 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>GLB Viewer with Camera & Drawer UI</title>
+  <title>3D Viewer with Blender Lights + Camera UI</title>
   <style>
     body { margin: 0; overflow: hidden; background: #111; }
+    canvas { display: block; }
     #cameraUI {
-      position: absolute;
-      top: 10px;
-      left: 10px;
+      position: absolute; top: 10px; left: 10px;
       z-index: 10;
     }
     .camera-btn {
-      margin: 4px;
-      padding: 6px 10px;
-      font-size: 13px;
+      margin: 4px; padding: 8px 12px;
+      font-size: 14px;
     }
     .toggle-btn {
       position: absolute;
       background: rgba(255,255,255,0.85);
-      color: #000;
-      padding: 3px 6px;
+      color: black;
+      padding: 4px 6px;
       font-size: 12px;
       border-radius: 4px;
       cursor: pointer;
@@ -45,28 +43,22 @@
     const clock = new THREE.Clock();
     const actions = {};
     let activeAction = null;
-    let currentState = 'closed';
     let drawerToggle = document.getElementById("drawerToggle");
-    let drawerObj, camList = {}, camerasFromGLB = [];
+    let drawerObj, camList = {};
+    let currentState = 'closed';
 
     scene = new THREE.Scene();
 
-    // Lighting from user settings
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
-    dirLight.position.set(5, 10, 7);
-    scene.add(ambientLight, dirLight);
-
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputEncoding = THREE.sRGBEncoding;
-    renderer.toneMapping = THREE.LinearToneMapping;
     document.body.appendChild(renderer.domElement);
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(3, 2, 3);
+
     controls = new OrbitControls(camera, renderer.domElement);
 
+    // DRACO Setup
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('./js/draco/');
 
@@ -76,27 +68,37 @@
     loader.load('untitled.glb', gltf => {
       const model = gltf.scene;
       scene.add(model);
+
+      // Pakai lampu dari Blender (jangan tambah lampu manual)
+      // Jika ingin debugging lampu, bisa console.log(gltf.scene)
+
       mixer = new THREE.AnimationMixer(model);
 
-      // Simpan kamera dari GLB
-      if (gltf.cameras) {
-        gltf.cameras.forEach(cam => {
-          if (cam.name) camList[cam.name] = cam;
-          camerasFromGLB.push(cam);
-        });
-      }
+      // Ambil semua kamera dari GLB
+      gltf.cameras?.forEach(cam => {
+        if (cam.name) camList[cam.name] = cam;
+      });
 
-      // Object drawer
+      // Ambil object laci (Drawer)
       drawerObj = model.getObjectByName('Drawer') || model;
 
       // Simpan animasi
       gltf.animations.forEach(clip => {
         const action = mixer.clipAction(clip);
-        action.clampWhenFinished = true;
         action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
+        action.enabled = true;
         actions[clip.name.toLowerCase()] = action;
       });
     });
+
+    function playAction(name) {
+      name = name.toLowerCase();
+      if (!actions[name]) return;
+      if (activeAction) activeAction.stop();
+      activeAction = actions[name];
+      activeAction.reset().play();
+    }
 
     drawerToggle.addEventListener('click', () => {
       if (currentState === 'closed') {
@@ -110,23 +112,13 @@
       }
     });
 
-    function playAction(name) {
-      name = name.toLowerCase();
-      if (!actions[name]) return;
-      if (activeAction) activeAction.stop();
-      activeAction = actions[name];
-      activeAction.reset().play();
-    }
-
     function switchCamera(name) {
       if (camList[name]) {
-        // Salin posisi dan rotasi dari kamera GLB ke kamera aktif
-        const glbCam = camList[name];
-        camera.position.copy(glbCam.position);
-        camera.quaternion.copy(glbCam.quaternion);
-        controls.update();
+        camera.position.copy(camList[name].position);
+        camera.quaternion.copy(camList[name].quaternion);
       }
     }
+    window.switchCamera = switchCamera;
 
     function updateUIPosition() {
       if (!drawerObj) return;
@@ -146,8 +138,7 @@
 
     function animate() {
       requestAnimationFrame(animate);
-      const delta = clock.getDelta();
-      if (mixer) mixer.update(delta);
+      if (mixer) mixer.update(clock.getDelta());
       controls.update();
       updateUIPosition();
       renderer.render(scene, camera);
