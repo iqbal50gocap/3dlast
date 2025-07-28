@@ -51,6 +51,9 @@
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMappingExposure = 1.0;
+      renderer.physicallyCorrectLights = true;
       document.body.appendChild(renderer.domElement);
 
       camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
@@ -68,8 +71,15 @@
         const model = gltf.scene;
         scene.add(model);
 
-        // Only use Blender lights
-        renderer.physicallyCorrectLights = true;
+        // Ambil kamera dari nama view1, view2, dll
+        const camNames = ['view1', 'view2'];
+        camNames.forEach(name => {
+          const camObj = model.getObjectByName(name);
+          if (camObj && camObj.isCamera) {
+            cameraList.push(camObj);
+          }
+        });
+        createCameraButtons();
 
         // Animations
         mixer = new THREE.AnimationMixer(model);
@@ -77,13 +87,7 @@
           animations[clip.name] = clip;
         });
 
-        // Cameras
-        gltf.cameras?.forEach((cam, i) => {
-          cameraList.push(cam);
-        });
-        createCameraButtons();
-
-        // Find the drawer by name if needed
+        // Drawer
         drawerObject = model.getObjectByName('drawer') || model;
       });
 
@@ -124,7 +128,6 @@
       const dt = clock.getDelta();
       mixer?.update(dt);
 
-      // Show/hide drawer UI if near
       if (drawerObject) {
         const distance = camera.position.distanceTo(drawerObject.getWorldPosition(new THREE.Vector3()));
         drawerButtons.style.display = distance < 2 ? 'flex' : 'none';
