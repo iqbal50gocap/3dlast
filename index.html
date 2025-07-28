@@ -2,10 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Fly Mode GLB Viewer</title>
+  <title>GLB Viewer - Terbang Bebas</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
+    #instructions {
+      position: absolute;
+      top: 40%; width: 100%;
+      text-align: center;
+      color: white;
+      font-size: 24px;
+      z-index: 100;
+    }
     #ui {
       position: absolute;
       top: 10px;
@@ -17,23 +25,16 @@
       padding: 10px;
       font-size: 16px;
     }
-    #instructions {
-      position: absolute;
-      top: 50%;
-      width: 100%;
-      text-align: center;
-      color: white;
-      font-size: 24px;
-    }
   </style>
 </head>
 <body>
+  <div id="instructions">
+    Klik untuk mulai (PointerLock)<br>
+    WASD untuk gerak, Mouse untuk lihat, Space untuk naik, Shift untuk turun
+  </div>
   <div id="ui">
     <button id="openBtn">Open Drawer</button>
     <button id="closeBtn">Close Drawer</button>
-  </div>
-  <div id="instructions">
-    Klik untuk mulai kontrol FPS (terbang)<br>WASD = gerak, Space = naik, Shift = turun
   </div>
 
   <script type="module">
@@ -42,70 +43,91 @@
     import { DRACOLoader } from './js/DRACOLoader.js';
     import { PointerLockControls } from './js/PointerLockControls.js';
 
-    let camera, scene, renderer, controls, mixer, actions = {};
+    let camera, scene, renderer, controls, mixer;
     const clock = new THREE.Clock();
-
-    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-    let moveUp = false, moveDown = false;
     const velocity = new THREE.Vector3();
     const direction = new THREE.Vector3();
-    const speed = 5;
+    const move = { forward: false, backward: false, left: false, right: false, up: false, down: false };
+    const actions = {};
 
-    // Scene Setup
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 2, 5);
+    init();
+    animate();
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
 
-    // Lighting
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444));
-    const dirLight = new THREE.DirectionalLight(0xffffff);
-    dirLight.position.set(3, 10, 10);
-    scene.add(dirLight);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 2, 5);
 
-    // Pointer Lock Controls (FPS Fly)
-    controls = new PointerLockControls(camera, document.body);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
 
-    document.getElementById('instructions').addEventListener('click', () => {
-      controls.lock();
-    });
+      controls = new PointerLockControls(camera, document.body);
+      scene.add(controls.object); // FIX deprecated getObject()
 
-    controls.addEventListener('lock', () => {
-      document.getElementById('instructions').style.display = 'none';
-    });
-
-    controls.addEventListener('unlock', () => {
-      document.getElementById('instructions').style.display = '';
-    });
-
-    scene.add(controls.getObject());
-
-    // DRACO Setup
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('./js/draco/');
-
-    const loader = new GLTFLoader();
-    loader.setDRACOLoader(dracoLoader);
-
-    loader.load('untitled.glb', gltf => {
-      const model = gltf.scene;
-      scene.add(model);
-
-      mixer = new THREE.AnimationMixer(model);
-
-      gltf.animations.forEach(clip => {
-        const action = mixer.clipAction(clip);
-        action.setLoop(THREE.LoopOnce);
-        action.clampWhenFinished = true;
-        action.enabled = true;
-        actions[clip.name.toLowerCase()] = action;
+      const instructions = document.getElementById('instructions');
+      instructions.addEventListener('click', () => {
+        controls.lock();
       });
-    }, undefined, console.error);
 
-    // Animation Buttons
+      controls.addEventListener('lock', () => instructions.style.display = 'none');
+      controls.addEventListener('unlock', () => instructions.style.display = '');
+
+      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('keyup', onKeyUp);
+
+      // Lighting
+      const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambient);
+      const directional = new THREE.DirectionalLight(0xffffff, 1);
+      directional.position.set(5, 10, 5);
+      scene.add(directional);
+
+      // Load GLB
+      const loader = new GLTFLoader();
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('./js/draco/');
+      loader.setDRACOLoader(dracoLoader);
+
+      loader.load('untitled.glb', (gltf) => {
+        const model = gltf.scene;
+        scene.add(model);
+
+        mixer = new THREE.AnimationMixer(model);
+        gltf.animations.forEach((clip) => {
+          const action = mixer.clipAction(clip);
+          action.setLoop(THREE.LoopOnce);
+          action.clampWhenFinished = true;
+          action.enabled = true;
+          actions[clip.name.toLowerCase()] = action;
+        });
+      });
+    }
+
+    function onKeyDown(event) {
+      switch (event.code) {
+        case 'KeyW': move.forward = true; break;
+        case 'KeyS': move.backward = true; break;
+        case 'KeyA': move.left = true; break;
+        case 'KeyD': move.right = true; break;
+        case 'Space': move.up = true; break;
+        case 'ShiftLeft': move.down = true; break;
+      }
+    }
+
+    function onKeyUp(event) {
+      switch (event.code) {
+        case 'KeyW': move.forward = false; break;
+        case 'KeyS': move.backward = false; break;
+        case 'KeyA': move.left = false; break;
+        case 'KeyD': move.right = false; break;
+        case 'Space': move.up = false; break;
+        case 'ShiftLeft': move.down = false; break;
+      }
+    }
+
     document.getElementById("openBtn").onclick = () => playAction("opendrawer");
     document.getElementById("closeBtn").onclick = () => playAction("closedrawer");
 
@@ -115,34 +137,32 @@
       actions[name].reset().play();
     }
 
-    // Movement Controls
-    const keys = {};
-    document.addEventListener('keydown', e => keys[e.code] = true);
-    document.addEventListener('keyup', e => keys[e.code] = false);
-
-    function updateMovement(delta) {
-      direction.z = Number(keys['KeyW']) - Number(keys['KeyS']);
-      direction.x = Number(keys['KeyD']) - Number(keys['KeyA']);
-      direction.y = Number(keys['Space']) - Number(keys['ShiftLeft']);
-
-      direction.normalize();
-
-      velocity.copy(direction).multiplyScalar(speed * delta);
-      controls.moveRight(velocity.x);
-      controls.moveForward(velocity.z);
-      camera.position.y += velocity.y;
-    }
-
-    // Animate
     function animate() {
       requestAnimationFrame(animate);
+
       const delta = clock.getDelta();
       if (mixer) mixer.update(delta);
-      if (controls.isLocked) updateMovement(delta);
+
+      if (controls.isLocked) {
+        velocity.set(0, 0, 0);
+        const speed = 5.0;
+
+        direction.set(
+          (move.right ? 1 : 0) - (move.left ? 1 : 0),
+          (move.up ? 1 : 0) - (move.down ? 1 : 0),
+          (move.backward ? 1 : 0) - (move.forward ? 1 : 0)
+        ).normalize();
+
+        if (direction.length() > 0) {
+          velocity.copy(direction).multiplyScalar(speed * delta);
+          controls.moveRight(velocity.x);
+          controls.moveForward(-velocity.z); // ingat: axis Z kebalik
+          camera.position.y += velocity.y;
+        }
+      }
+
       renderer.render(scene, camera);
     }
-
-    animate();
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
