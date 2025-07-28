@@ -2,35 +2,43 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>GLB Viewer with Camera Switch & Proximity UI</title>
+  <title>GLB Viewer with Camera & Drawer UI</title>
   <style>
     body { margin: 0; overflow: hidden; font-family: sans-serif; }
     #cameraButtons {
       position: absolute; top: 10px; left: 10px;
       background: rgba(0,0,0,0.7); color: white;
       padding: 10px; border-radius: 5px;
+      z-index: 10;
     }
-    #drawerButtons {
+    #drawerToggle {
       position: absolute;
       bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
       display: none;
-      gap: 10px;
-    }
-    #drawerButtons button {
-      padding: 10px 15px;
-      background: #333; color: white;
-      border: none; border-radius: 4px;
+      background: rgba(255,255,255,0.9);
+      padding: 8px 16px;
+      border-radius: 5px;
       cursor: pointer;
+      z-index: 10;
+    }
+    #lightSettings {
+      position: absolute; top: 10px; right: 10px;
+      background: rgba(0,0,0,0.7); color: white;
+      padding: 10px; border-radius: 5px;
+      z-index: 10;
+    }
+    #lightSettings input[type=range] {
+      width: 100px;
     }
   </style>
 </head>
 <body>
   <div id="cameraButtons"></div>
-  <div id="drawerButtons">
-    <button onclick="playAnim('opendrawer')">Open</button>
-    <button onclick="playAnim('closedrawer')">Close</button>
+  <div id="drawerToggle">Open</div>
+  <div id="lightSettings">
+    <label>Brightness: <input id="lightIntensity" type="range" min="0" max="2" step="0.1" value="1"></label>
   </div>
   <script type="module">
     import * as THREE from './js/three.module.js';
@@ -41,8 +49,10 @@
     let camera, scene, renderer, controls, mixer, clock = new THREE.Clock();
     let animations = {}, cameraList = [], currentCamera;
     let drawerObject = null;
+    let currentState = 'closed';
+    const drawerToggle = document.getElementById('drawerToggle');
 
-    const drawerButtons = document.getElementById('drawerButtons');
+    let lights = [];
 
     init();
 
@@ -52,8 +62,7 @@
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.outputEncoding = THREE.sRGBEncoding;
-      renderer.toneMappingExposure = 1.0;
-      renderer.physicallyCorrectLights = true;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
       document.body.appendChild(renderer.domElement);
 
       camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
@@ -71,24 +80,45 @@
         const model = gltf.scene;
         scene.add(model);
 
-        // Ambil kamera dari nama view1, view2, dll
-        const camNames = ['view1', 'view2'];
-        camNames.forEach(name => {
-          const camObj = model.getObjectByName(name);
-          if (camObj && camObj.isCamera) {
-            cameraList.push(camObj);
+        renderer.physicallyCorrectLights = true;
+
+        // Ambil lampu dari Blender
+        model.traverse(obj => {
+          if (obj.isLight) {
+            lights.push(obj);
           }
         });
-        createCameraButtons();
 
         // Animations
         mixer = new THREE.AnimationMixer(model);
         gltf.animations.forEach(clip => {
-          animations[clip.name] = clip;
+          animations[clip.name.toLowerCase()] = mixer.clipAction(clip);
+          animations[clip.name.toLowerCase()].setLoop(THREE.LoopOnce);
+          animations[clip.name.toLowerCase()].clampWhenFinished = true;
         });
 
-        // Drawer
+        // Cameras
+        gltf.cameras?.forEach(cam => cameraList.push(cam));
+        createCameraButtons();
+
+        // Drawer object
         drawerObject = model.getObjectByName('drawer') || model;
+      });
+
+      document.getElementById('lightIntensity').addEventListener('input', e => {
+        lights.forEach(light => light.intensity = parseFloat(e.target.value));
+      });
+
+      drawerToggle.addEventListener('click', () => {
+        if (currentState === 'closed') {
+          playAnim('opendrawer');
+          drawerToggle.innerText = 'Close';
+          currentState = 'open';
+        } else {
+          playAnim('closedrawer');
+          drawerToggle.innerText = 'Open';
+          currentState = 'closed';
+        }
       });
 
       window.addEventListener('resize', () => {
@@ -115,10 +145,11 @@
       });
     }
 
-    window.playAnim = function(name) {
+    function playAnim(name) {
+      name = name.toLowerCase();
       if (animations[name]) {
         mixer.stopAllAction();
-        mixer.clipAction(animations[name]).reset().play();
+        animations[name].reset().play();
       }
     }
 
@@ -128,9 +159,19 @@
       const dt = clock.getDelta();
       mixer?.update(dt);
 
+      // Tampilkan tombol jika dekat drawer
       if (drawerObject) {
-        const distance = camera.position.distanceTo(drawerObject.getWorldPosition(new THREE.Vector3()));
-        drawerButtons.style.display = distance < 2 ? 'flex' : 'none';
+        const dist = camera.position.distanceTo(drawerObject.getWorldPosition(new THREE.Vector3()));
+        if (dist < 2.5) {
+          const pos = drawerObject.getWorldPosition(new THREE.Vector3()).clone().project(camera);
+          const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+          const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+          drawerToggle.style.left = `${x - 40}px`;
+          drawerToggle.style.top = `${y - 20}px`;
+          drawerToggle.style.display = 'block';
+        } else {
+          drawerToggle.style.display = 'none';
+        }
       }
 
       renderer.render(scene, currentCamera || camera);
