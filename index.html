@@ -2,40 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>GLB Viewer - Terbang Bebas</title>
+  <title>GLB Drawer with Proximity + E Toggle</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
+
+    #popup {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      background: rgba(0,0,0,0.6);
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 20px;
+      z-index: 5;
+      display: none;
+    }
+
     #instructions {
       position: absolute;
-      top: 40%; width: 100%;
+      top: 30%;
+      width: 100%;
       text-align: center;
       color: white;
       font-size: 24px;
-      z-index: 100;
-    }
-    #ui {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 10;
-    }
-    button {
-      margin: 5px;
-      padding: 10px;
-      font-size: 16px;
+      z-index: 5;
     }
   </style>
 </head>
 <body>
-  <div id="instructions">
-    Klik untuk mulai (PointerLock)<br>
-    WASD untuk gerak, Mouse untuk lihat, Space untuk naik, Shift untuk turun
-  </div>
-  <div id="ui">
-    <button id="openBtn">Open Drawer</button>
-    <button id="closeBtn">Close Drawer</button>
-  </div>
+  <div id="instructions">Klik untuk mulai. WASD = gerak, Space = naik, Shift = turun, E = buka/tutup</div>
+  <div id="popup">Press E to Open</div>
 
   <script type="module">
     import * as THREE from './js/three.module.js';
@@ -49,6 +48,9 @@
     const direction = new THREE.Vector3();
     const move = { forward: false, backward: false, left: false, right: false, up: false, down: false };
     const actions = {};
+    let model, currentState = 'closed';
+
+    const popup = document.getElementById('popup');
 
     init();
     animate();
@@ -65,7 +67,7 @@
       document.body.appendChild(renderer.domElement);
 
       controls = new PointerLockControls(camera, document.body);
-      scene.add(controls.object); // FIX deprecated getObject()
+      scene.add(controls.object); // fixed deprecated getObject()
 
       const instructions = document.getElementById('instructions');
       instructions.addEventListener('click', () => {
@@ -85,14 +87,14 @@
       directional.position.set(5, 10, 5);
       scene.add(directional);
 
-      // Load GLB
+      // Load model
       const loader = new GLTFLoader();
-      const dracoLoader = new DRACOLoader();
-      dracoLoader.setDecoderPath('./js/draco/');
-      loader.setDRACOLoader(dracoLoader);
+      const draco = new DRACOLoader();
+      draco.setDecoderPath('./js/draco/');
+      loader.setDRACOLoader(draco);
 
       loader.load('untitled.glb', (gltf) => {
-        const model = gltf.scene;
+        model = gltf.scene;
         scene.add(model);
 
         mixer = new THREE.AnimationMixer(model);
@@ -106,19 +108,22 @@
       });
     }
 
-    function onKeyDown(event) {
-      switch (event.code) {
+    function onKeyDown(e) {
+      switch (e.code) {
         case 'KeyW': move.forward = true; break;
         case 'KeyS': move.backward = true; break;
         case 'KeyA': move.left = true; break;
         case 'KeyD': move.right = true; break;
         case 'Space': move.up = true; break;
         case 'ShiftLeft': move.down = true; break;
+        case 'KeyE':
+          if (popup.style.display === 'block') toggleDrawer();
+          break;
       }
     }
 
-    function onKeyUp(event) {
-      switch (event.code) {
+    function onKeyUp(e) {
+      switch (e.code) {
         case 'KeyW': move.forward = false; break;
         case 'KeyS': move.backward = false; break;
         case 'KeyA': move.left = false; break;
@@ -128,8 +133,17 @@
       }
     }
 
-    document.getElementById("openBtn").onclick = () => playAction("opendrawer");
-    document.getElementById("closeBtn").onclick = () => playAction("closedrawer");
+    function toggleDrawer() {
+      if (currentState === 'closed') {
+        playAction('opendrawer');
+        currentState = 'opened';
+        popup.textContent = 'Press E to Close';
+      } else {
+        playAction('closedrawer');
+        currentState = 'closed';
+        popup.textContent = 'Press E to Open';
+      }
+    }
 
     function playAction(name) {
       if (!actions[name]) return;
@@ -145,7 +159,7 @@
 
       if (controls.isLocked) {
         velocity.set(0, 0, 0);
-        const speed = 5.0;
+        const speed = 5;
 
         direction.set(
           (move.right ? 1 : 0) - (move.left ? 1 : 0),
@@ -156,12 +170,23 @@
         if (direction.length() > 0) {
           velocity.copy(direction).multiplyScalar(speed * delta);
           controls.moveRight(velocity.x);
-          controls.moveForward(-velocity.z); // ingat: axis Z kebalik
+          controls.moveForward(-velocity.z);
           camera.position.y += velocity.y;
         }
       }
 
+      checkDistance();
       renderer.render(scene, camera);
+    }
+
+    function checkDistance() {
+      if (!model) return;
+      const distance = camera.position.distanceTo(model.position);
+      if (distance < 2.5) {
+        popup.style.display = 'block';
+      } else {
+        popup.style.display = 'none';
+      }
     }
 
     window.addEventListener('resize', () => {
